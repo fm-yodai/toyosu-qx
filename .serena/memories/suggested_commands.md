@@ -1,0 +1,7 @@
+- `uv sync` – install/lock runtime + dev dependencies from pyproject.toml.
+- `uv run python run.py --scenario config/scenario/default.yaml --config config/config.yaml --seed 42` – execute the canonical simulation pipeline (produces data/runs/<run_id>/ artifacts).
+- `uv run python generate_report.py <run_id> --scenario config/scenario/default.yaml` – rebuild dashboards/visuals from an existing run folder.
+- `uv run python quick_check.py` – run deterministic smoke that summarizes planner/KPI outputs for the latest or given run.
+- `uv run pytest -q --cov=sim --maxfail=1` – execute the pytest suite with coverage gate before opening a PR.
+- `uv run mypy --strict` – enforce typing contract.
+- `uv run ruff format && uv run ruff check` – apply Ruff formatting and linting passes.

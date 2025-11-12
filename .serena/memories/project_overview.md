@@ -1,0 +1,5 @@
+- Toyosu-QX is a discrete-event simulation platform that models turret truck (tare) logistics inside the Toyosu market to evaluate utilization, lead times, and fulfillment KPIs, with a future path toward real-time optimization.
+- Python 3.12+ codebase centered on SimPy for the DES core plus pandas/pyarrow/plotly for analytics and visualization; CLI entry points live in run.py (full pipeline) and lightweight main.py, while reusable modules sit under sim/ (engine, demand generator, planner, KPI aggregator, visualization helpers).
+- Configuration YAMLs live in config/ (global knobs) and config/scenario/ (per-demand topology/fleet profiles); simulation outputs are written under data/runs/<run_id>/ along with HTML reports.
+- Documentation describing architecture, glossary, visualization, and verification workflows lives in docs/, and exploratory notebooks belong in notebooks/.
+- Large Parquet/HTML artifacts under data/runs/ are transient and should never be committed.

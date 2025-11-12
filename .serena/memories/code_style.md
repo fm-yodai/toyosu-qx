@@ -1,0 +1,5 @@
+- Target Python 3.12+ with full typing; keep modules snake_case, but dataclasses like TareEvent can use PascalCase when semantically a type.
+- Enforce mypy --strict, Ruff format + Ruff lint defaults, and prefer 4-space indentation.
+- DES flows should live in sim/ modules so both main.py and run.py can reuse them; scenario fixtures use kebab-case filenames under config/scenario/.
+- Planner/KPI additions should be property-tested via pytest and validated with quick_check.py; maintain ≥85% coverage on touched sim packages or explain trade-offs and follow-up TODOs.
+- Avoid committing secrets or large data artifacts; keep experiments reproducible via fixed seeds and record scenario hashes stored in data/runs/<id>/meta.jsonl.
