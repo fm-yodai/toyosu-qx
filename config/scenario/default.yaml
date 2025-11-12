@@ -1,0 +1,103 @@
+# Toyosu-QX Default Scenario
+# Defines market topology, demand patterns, and fleet configuration
+
+# Simulation parameters
+sim_duration_sec: 28800  # 8 hours (4:00-12:00)
+random_seed: 42
+
+# Demand generation
+demand:
+  base_rate: 0.1         # Base order rate (orders per second)
+
+  # Time-of-day intensity multipliers
+  intensity_curve:
+    "04:00": 0.5         # Early morning: low
+    "06:00": 1.5         # Morning rush: high
+    "08:00": 2.0         # Peak: very high
+    "10:00": 1.0         # Mid-morning: medium
+    "12:00": 0.3         # Near close: low
+
+  # Order lot sizes (kg) and probabilities
+  lot_sizes: [10, 30, 50]           # S, M, L
+  lot_probabilities: [0.5, 0.3, 0.2]  # 50% S, 30% M, 20% L
+
+# Market topology
+nodes:
+  # Wholesalers (仲卸)
+  - id: "W1"
+    type: wholesaler
+    x: 0
+    y: 0
+    name: "Wholesaler 1"
+
+  - id: "W2"
+    type: wholesaler
+    x: 100
+    y: 0
+    name: "Wholesaler 2"
+
+  - id: "W3"
+    type: wholesaler
+    x: 200
+    y: 0
+    name: "Wholesaler 3"
+
+  # Retailers (小売)
+  - id: "R1"
+    type: retailer
+    x: 50
+    y: 150
+    name: "Retailer 1"
+
+  - id: "R2"
+    type: retailer
+    x: 150
+    y: 150
+    name: "Retailer 2"
+
+  - id: "R3"
+    type: retailer
+    x: 100
+    y: 250
+    name: "Retailer 3"
+
+  - id: "R4"
+    type: retailer
+    x: 0
+    y: 200
+    name: "Retailer 4"
+
+  - id: "R5"
+    type: retailer
+    x: 200
+    y: 200
+    name: "Retailer 5"
+
+# Fleet configuration
+tares:
+  # Tares owned by W1
+  - id: "T1-1"
+    home: "W1"
+    capacity_kg: 200
+
+  - id: "T1-2"
+    home: "W1"
+    capacity_kg: 200
+
+  # Tares owned by W2
+  - id: "T2-1"
+    home: "W2"
+    capacity_kg: 200
+
+  - id: "T2-2"
+    home: "W2"
+    capacity_kg: 200
+
+  # Tares owned by W3
+  - id: "T3-1"
+    home: "W3"
+    capacity_kg: 200
+
+  - id: "T3-2"
+    home: "W3"
+    capacity_kg: 200

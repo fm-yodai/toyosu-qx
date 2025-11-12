@@ -1,0 +1,23 @@
+# Toyosu-QX Configuration
+# Core simulation parameters
+
+# Speed and timing parameters
+speed_kmph: 8.0           # Average tare speed in market (km/h)
+alpha_load: 0.3           # Loading time coefficient (seconds per kg)
+beta_load: 10.0           # Loading base time (seconds)
+trade_proc_sec: 30        # Trade confirmation processing time (seconds)
+
+# Tare specifications
+capacity_kg: 200          # Maximum tare capacity (kg)
+
+# Departure trigger rules
+depart_trigger:
+  min_stay_sec: 300       # 5-minute rule: minimum wait before departure
+  min_load_ratio: 0.5     # Depart if load reaches 50% of capacity
+
+# Consolidation policy
+# Options: same_destination_only, multi_destination (future)
+consolidation: same_destination_only
+
+# Operating window
+window: "04:00-12:00"     # Market operating hours (HH:MM-HH:MM)
