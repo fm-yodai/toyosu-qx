@@ -92,6 +92,155 @@ def extract_node_coordinates(events_df: pd.DataFrame) -> dict[str, tuple[float, 
 # Animation: Tare Movement Visualization
 # ============================================================================
 
+def create_grid_animation(
+    run_id: str,
+    node_coords: dict[str, tuple[int, int]],
+    grid_width: int = 30,
+    grid_height: int = 30,
+    cell_size_m: float = 10.0,
+    time_bin_sec: int = 60,
+    data_dir: str = "data/runs",
+) -> go.Figure:
+    """
+    Create animated scatter plot showing tare movements on a 2D grid.
+
+    The grid displays corridors where tares can only move horizontally
+    or vertically (Manhattan distance movement).
+
+    Args:
+        run_id: Simulation run identifier
+        node_coords: Dictionary mapping node_id to (x, y) grid cell coordinates
+        grid_width: Grid width in cells
+        grid_height: Grid height in cells
+        cell_size_m: Size of each cell in meters
+        time_bin_sec: Time interval for animation frames (seconds)
+        data_dir: Base directory for run data
+
+    Returns:
+        Plotly Figure with animation on grid background
+    """
+    events_df, _, _ = load_simulation_data(run_id, data_dir)
+    events_df = parse_event_payload(events_df)
+
+    # Extract position events
+    position_events = events_df[
+        (events_df["event"].isin(["depart", "arrive", "load_start", "unload_start"])) &
+        (events_df["tare_id"].notna()) &
+        (events_df["node"].notna())
+    ].copy()
+
+    if position_events.empty:
+        print("Warning: No position events found")
+        return go.Figure()
+
+    # Add grid coordinates
+    position_events["x"] = position_events["node"].map(lambda n: node_coords.get(n, (0, 0))[0])
+    position_events["y"] = position_events["node"].map(lambda n: node_coords.get(n, (0, 0))[1])
+
+    # Bin time for animation frames
+    position_events["time_bin"] = (position_events["ts"] // time_bin_sec) * time_bin_sec
+    position_events["time_label"] = position_events["time_bin"].apply(
+        lambda t: f"{int(t//3600):02d}:{int((t%3600)//60):02d}"
+    )
+
+    # Create animation
+    fig = px.scatter(
+        position_events,
+        x="x",
+        y="y",
+        animation_frame="time_bin",
+        animation_group="tare_id",
+        color="tare_id",
+        hover_name="tare_id",
+        hover_data={
+            "node": True,
+            "state": True,
+            "load_kg": True,
+            "x": ":.0f",
+            "y": ":.0f",
+            "time_bin": False,
+        },
+        title=f"Tare Movement on Grid: {run_id}",
+        labels={"x": "X (grid cell)", "y": "Y (grid cell)"},
+    )
+
+    # Add grid lines (corridors)
+    for i in range(grid_width + 1):
+        fig.add_shape(
+            type="line",
+            x0=i - 0.5, y0=-0.5, x1=i - 0.5, y1=grid_height - 0.5,
+            line=dict(color="lightgray", width=1, dash="dot"),
+            layer="below",
+        )
+    for j in range(grid_height + 1):
+        fig.add_shape(
+            type="line",
+            x0=-0.5, y0=j - 0.5, x1=grid_width - 0.5, y1=j - 0.5,
+            line=dict(color="lightgray", width=1, dash="dot"),
+            layer="below",
+        )
+
+    # Set fixed axis ranges for grid
+    fig.update_xaxes(range=[-1, grid_width], dtick=5, showgrid=False)
+    fig.update_yaxes(range=[-1, grid_height], dtick=5, showgrid=False)
+
+    # Make aspect ratio 1:1
+    fig.update_layout(
+        width=900,
+        height=900,
+        xaxis=dict(scaleanchor="y", scaleratio=1),
+    )
+
+    # Add node markers (wholesalers and retailers)
+    wholesalers = {n: c for n, c in node_coords.items() if n.startswith("W")}
+    retailers = {n: c for n, c in node_coords.items() if n.startswith("R")}
+
+    # Wholesalers (blue squares)
+    for node_id, (x, y) in wholesalers.items():
+        fig.add_trace(
+            go.Scatter(
+                x=[x],
+                y=[y],
+                mode="markers+text",
+                marker=dict(size=20, color="blue", symbol="square", opacity=0.7),
+                text=[node_id],
+                textposition="top center",
+                textfont=dict(size=10, color="blue"),
+                showlegend=False,
+                hoverinfo="text",
+                hovertext=f"Wholesaler: {node_id}<br>Grid: ({x}, {y})",
+            )
+        )
+
+    # Retailers (green diamonds)
+    for node_id, (x, y) in retailers.items():
+        fig.add_trace(
+            go.Scatter(
+                x=[x],
+                y=[y],
+                mode="markers+text",
+                marker=dict(size=16, color="green", symbol="diamond", opacity=0.7),
+                text=[node_id],
+                textposition="top center",
+                textfont=dict(size=10, color="green"),
+                showlegend=False,
+                hoverinfo="text",
+                hovertext=f"Retailer: {node_id}<br>Grid: ({x}, {y})",
+            )
+        )
+
+    # Add legend annotation
+    fig.add_annotation(
+        text="◼ Wholesaler  ◆ Retailer  ● Tare",
+        xref="paper", yref="paper",
+        x=0.5, y=1.02,
+        showarrow=False,
+        font=dict(size=12),
+    )
+
+    return fig
+
+
 def create_tare_animation(
     run_id: str,
     node_coords: dict[str, tuple[float, float]],

@@ -5,12 +5,11 @@ Manages the event loop, tare resources, and coordinates the simulation
 of loading, traveling, unloading, and trade confirmation events.
 """
 
-import math
 from typing import Any
 
 import simpy
 
-from .models import EventType, Node, Order, SimEvent, Tare, TareState
+from .models import EventType, Grid, Node, Order, SimEvent, Tare, TareState
 
 
 class SimulationEngine:
@@ -18,6 +17,8 @@ class SimulationEngine:
     Core simulation engine using SimPy.
 
     Manages discrete events at 1-second granularity for tare operations.
+    Uses a 2D grid space where movement is restricted to corridors
+    (horizontal and vertical only - Manhattan distance).
     """
 
     def __init__(
@@ -26,6 +27,7 @@ class SimulationEngine:
         config: dict[str, Any],
         nodes: dict[str, Node],
         tares: dict[str, Tare],
+        grid: Grid | None = None,
     ):
         """
         Initialize simulation engine.
@@ -35,6 +37,7 @@ class SimulationEngine:
             config: Configuration parameters (speed, alpha_load, etc.)
             nodes: Dictionary of Node objects by ID
             tares: Dictionary of Tare objects by ID
+            grid: 2D grid space (optional, created from config if not provided)
         """
         self.run_id = run_id
         self.config = config
@@ -48,6 +51,17 @@ class SimulationEngine:
         self.alpha_load = config.get("alpha_load", 0.3)  # s/kg
         self.beta_load = config.get("beta_load", 10.0)  # s
         self.trade_proc_sec = config.get("trade_proc_sec", 30)
+
+        # Initialize grid (default: 30x30 grid, 10m per cell)
+        if grid is not None:
+            self.grid = grid
+        else:
+            grid_config = config.get("grid", {})
+            self.grid = Grid(
+                width=grid_config.get("width", 30),
+                height=grid_config.get("height", 30),
+                cell_size_m=grid_config.get("cell_size_m", 10.0),
+            )
 
     def log_event(
         self,
@@ -73,7 +87,11 @@ class SimulationEngine:
 
     def distance(self, node_a_id: str, node_b_id: str) -> float:
         """
-        Calculate Euclidean distance between two nodes.
+        Calculate Manhattan distance between two nodes.
+
+        In a grid with corridors, tares can only move horizontally
+        or vertically, so the distance is |x1-x2| + |y1-y2| cells
+        multiplied by the cell size in meters.
 
         Args:
             node_a_id: First node ID
@@ -84,9 +102,7 @@ class SimulationEngine:
         """
         node_a = self.nodes[node_a_id]
         node_b = self.nodes[node_b_id]
-        dx = node_a.x - node_b.x
-        dy = node_a.y - node_b.y
-        return math.sqrt(dx * dx + dy * dy)
+        return self.grid.distance_meters(node_a.x, node_a.y, node_b.x, node_b.y)
 
     def travel_time(self, distance_m: float) -> float:
         """

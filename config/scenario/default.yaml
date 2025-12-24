@@ -1,9 +1,17 @@
 # Toyosu-QX Default Scenario
 # Defines market topology, demand patterns, and fleet configuration
+# Uses 2D grid coordinates where tares move on corridors (Manhattan distance)
 
 # Simulation parameters
 sim_duration_sec: 28800  # 8 hours (4:00-12:00)
 random_seed: 42
+
+# 2D Grid configuration
+# Movement is restricted to horizontal/vertical (corridor-based)
+grid:
+  width: 30              # Grid width in cells
+  height: 30             # Grid height in cells
+  cell_size_m: 10.0      # Each cell is 10m x 10m
 
 # Demand generation
 demand:
@@ -21,56 +29,60 @@ demand:
   lot_sizes: [10, 30, 50]           # S, M, L
   lot_probabilities: [0.5, 0.3, 0.2]  # 50% S, 30% M, 20% L
 
-# Market topology
+# Market topology (grid coordinates)
+# The market is laid out on a grid:
+#   - Wholesalers (仲卸) are at the bottom (y=2)
+#   - Retailers (小売) are distributed in the upper area
+#   - Tares travel along corridors (horizontal/vertical only)
 nodes:
-  # Wholesalers (仲卸)
+  # Wholesalers (仲卸) - bottom row
   - id: "W1"
     type: wholesaler
-    x: 0
-    y: 0
+    x: 5
+    y: 2
     name: "Wholesaler 1"
 
   - id: "W2"
     type: wholesaler
-    x: 100
-    y: 0
+    x: 15
+    y: 2
     name: "Wholesaler 2"
 
   - id: "W3"
     type: wholesaler
-    x: 200
-    y: 0
+    x: 25
+    y: 2
     name: "Wholesaler 3"
 
-  # Retailers (小売)
+  # Retailers (小売) - distributed in upper area
   - id: "R1"
     type: retailer
-    x: 50
-    y: 150
+    x: 3
+    y: 15
     name: "Retailer 1"
 
   - id: "R2"
     type: retailer
-    x: 150
-    y: 150
+    x: 12
+    y: 12
     name: "Retailer 2"
 
   - id: "R3"
     type: retailer
-    x: 100
-    y: 250
+    x: 20
+    y: 18
     name: "Retailer 3"
 
   - id: "R4"
     type: retailer
-    x: 0
-    y: 200
+    x: 8
+    y: 25
     name: "Retailer 4"
 
   - id: "R5"
     type: retailer
-    x: 200
-    y: 200
+    x: 27
+    y: 22
     name: "Retailer 5"
 
 # Fleet configuration

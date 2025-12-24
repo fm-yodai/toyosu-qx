@@ -2,12 +2,64 @@
 Core data models for Toyosu-QX simulation.
 
 Defines the main entities: Tare (turret truck), Order, Node (location),
-and various event/state enums.
+Grid (2D space), and various event/state enums.
 """
 
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+
+
+@dataclass
+class Grid:
+    """
+    2D grid space representing the market layout.
+
+    The grid consists of corridors (通路) where tares can move.
+    Movement is restricted to horizontal (x-axis) and vertical (y-axis)
+    directions only (Manhattan distance).
+
+    Attributes:
+        width: Grid width in cells
+        height: Grid height in cells
+        cell_size_m: Size of each cell in meters (default 10m)
+    """
+    width: int
+    height: int
+    cell_size_m: float = 10.0  # Each cell is 10m x 10m
+
+    def is_valid_position(self, x: int, y: int) -> bool:
+        """Check if position is within grid bounds."""
+        return 0 <= x < self.width and 0 <= y < self.height
+
+    def manhattan_distance(self, x1: int, y1: int, x2: int, y2: int) -> int:
+        """
+        Calculate Manhattan distance between two grid positions.
+
+        In a grid with corridors, tares can only move horizontally
+        or vertically, so the distance is |x1-x2| + |y1-y2| cells.
+
+        Args:
+            x1, y1: Start position
+            x2, y2: End position
+
+        Returns:
+            Manhattan distance in cells
+        """
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def distance_meters(self, x1: int, y1: int, x2: int, y2: int) -> float:
+        """
+        Calculate distance in meters between two grid positions.
+
+        Args:
+            x1, y1: Start position
+            x2, y2: End position
+
+        Returns:
+            Distance in meters
+        """
+        return self.manhattan_distance(x1, y1, x2, y2) * self.cell_size_m
 
 
 class TareState(Enum):
@@ -47,14 +99,14 @@ class Node:
     Attributes:
         id: Unique node identifier
         type: WHOLESALER or RETAILER
-        x: X coordinate (meters)
-        y: Y coordinate (meters)
+        x: X grid coordinate (cell position)
+        y: Y grid coordinate (cell position)
         name: Human-readable name (optional)
     """
     id: str
     type: NodeType
-    x: float
-    y: float
+    x: int  # Grid cell x-coordinate
+    y: int  # Grid cell y-coordinate
     name: Optional[str] = None
 
 
