@@ -5,6 +5,7 @@ from .engine import SimulationEngine
 from .kpi import KPIAggregator
 from .models import (
     EventType,
+    Grid,
     Node,
     NodeType,
     Order,
@@ -19,6 +20,7 @@ __all__ = [
     "SimulationEngine",
     "KPIAggregator",
     "RuleBasedPlanner",
+    "Grid",
     "Node",
     "NodeType",
     "Order",

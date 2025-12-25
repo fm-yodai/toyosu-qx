@@ -17,30 +17,64 @@ import yaml
 from sim.viz import (
     create_demand_heatmap,
     create_delivery_sankey,
+    create_grid_animation,
     create_kpi_dashboard,
     create_tare_animation,
     create_tare_utilization_heatmap,
 )
 
 
-def load_node_coordinates(scenario_path: str) -> dict[str, tuple[float, float]]:
+def load_scenario(scenario_path: str) -> dict:
     """
-    Load node coordinates from scenario file.
+    Load scenario configuration from YAML file.
 
     Args:
         scenario_path: Path to scenario YAML file
 
     Returns:
-        Dictionary mapping node_id to (x, y) coordinates
+        Scenario configuration dictionary
     """
     with open(scenario_path, "r", encoding="utf-8") as f:
-        scenario = yaml.safe_load(f)
+        return yaml.safe_load(f)
+
+
+def load_node_coordinates(scenario_path: str) -> dict[str, tuple[int, int]]:
+    """
+    Load node grid coordinates from scenario file.
+
+    Args:
+        scenario_path: Path to scenario YAML file
+
+    Returns:
+        Dictionary mapping node_id to (x, y) grid cell coordinates
+    """
+    scenario = load_scenario(scenario_path)
 
     node_coords = {}
     for node in scenario.get("nodes", []):
-        node_coords[node["id"]] = (float(node["x"]), float(node["y"]))
+        node_coords[node["id"]] = (int(node["x"]), int(node["y"]))
 
     return node_coords
+
+
+def load_grid_config(scenario_path: str) -> dict:
+    """
+    Load grid configuration from scenario file.
+
+    Args:
+        scenario_path: Path to scenario YAML file
+
+    Returns:
+        Grid configuration (width, height, cell_size_m)
+    """
+    scenario = load_scenario(scenario_path)
+
+    grid_config = scenario.get("grid", {})
+    return {
+        "width": grid_config.get("width", 30),
+        "height": grid_config.get("height", 30),
+        "cell_size_m": grid_config.get("cell_size_m", 10.0),
+    }
 
 
 def generate_report(run_id: str, scenario_path: str | None = None, data_dir: str = "data/runs") -> None:
@@ -61,11 +95,14 @@ def generate_report(run_id: str, scenario_path: str | None = None, data_dir: str
     print(f"Generating report for: {run_id}")
     print(f"Data directory: {run_path}")
 
-    # Load node coordinates if scenario provided
+    # Load node coordinates and grid config if scenario provided
     node_coords = {}
+    grid_config = {"width": 30, "height": 30, "cell_size_m": 10.0}
     if scenario_path and Path(scenario_path).exists():
         node_coords = load_node_coordinates(scenario_path)
+        grid_config = load_grid_config(scenario_path)
         print(f"Loaded {len(node_coords)} node coordinates from {scenario_path}")
+        print(f"Grid: {grid_config['width']}x{grid_config['height']} cells ({grid_config['cell_size_m']}m/cell)")
     else:
         print("Warning: No scenario file provided. Animation will be skipped.")
 
@@ -122,23 +159,30 @@ def generate_report(run_id: str, scenario_path: str | None = None, data_dir: str
     except Exception as e:
         print(f"   Error creating 3-layer Sankey: {e}")
 
-    # 6. Tare Animation (only if node coordinates available)
+    # 6. Tare Grid Animation (only if node coordinates available)
     if node_coords:
-        print("6. Creating tare animation...")
+        print("6. Creating tare grid animation...")
         try:
-            fig_anim = create_tare_animation(run_id, node_coords, data_dir=data_dir)
-            anim_path = run_path / "animation_tares.html"
+            fig_anim = create_grid_animation(
+                run_id,
+                node_coords,
+                grid_width=grid_config["width"],
+                grid_height=grid_config["height"],
+                cell_size_m=grid_config["cell_size_m"],
+                data_dir=data_dir,
+            )
+            anim_path = run_path / "animation_grid.html"
             fig_anim.write_html(anim_path)
             print(f"   Saved: {anim_path}")
         except Exception as e:
-            print(f"   Error creating animation: {e}")
+            print(f"   Error creating grid animation: {e}")
     else:
-        print("6. Skipping tare animation (no node coordinates)")
+        print("6. Skipping grid animation (no node coordinates)")
 
     # Generate comprehensive report
     print("\n=== Generating Comprehensive Report ===")
     report_path = run_path / "report.html"
-    _generate_comprehensive_html(run_id, run_path, report_path, node_coords)
+    _generate_comprehensive_html(run_id, run_path, report_path, node_coords, grid_config)
     print(f"Saved comprehensive report: {report_path}")
 
     print(f"\n✓ Report generation complete!")
@@ -150,13 +194,14 @@ def _generate_comprehensive_html(
     run_path: Path,
     output_path: Path,
     node_coords: dict,
+    grid_config: dict,
 ) -> None:
     """Generate a single HTML file with all visualizations embedded."""
     from sim.viz import (
         create_demand_heatmap,
         create_delivery_sankey,
+        create_grid_animation,
         create_kpi_dashboard,
-        create_tare_animation,
         create_tare_utilization_heatmap,
     )
 
@@ -252,11 +297,19 @@ def _generate_comprehensive_html(
         html_parts.append(f"<p>Error: {e}</p>")
     html_parts.append("</div>")
 
-    # Animation (if available)
+    # Grid Animation (if available)
     if node_coords:
-        html_parts.append('<div class="section"><h2>Tare Movement Animation</h2>')
+        html_parts.append('<div class="section"><h2>Tare Movement on Grid</h2>')
+        html_parts.append('<p>Tares move along corridors (horizontal/vertical only - Manhattan distance)</p>')
         try:
-            fig = create_tare_animation(run_id, node_coords, data_dir=str(run_path.parent.parent))
+            fig = create_grid_animation(
+                run_id,
+                node_coords,
+                grid_width=grid_config.get("width", 30),
+                grid_height=grid_config.get("height", 30),
+                cell_size_m=grid_config.get("cell_size_m", 10.0),
+                data_dir=str(run_path.parent.parent),
+            )
             html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
         except Exception as e:
             html_parts.append(f"<p>Error: {e}</p>")

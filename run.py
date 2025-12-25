@@ -21,7 +21,7 @@ import yaml
 from sim.demand import DemandGenerator
 from sim.engine import SimulationEngine
 from sim.kpi import KPIAggregator
-from sim.models import EventType, Node, NodeType, Tare, TareState
+from sim.models import EventType, Grid, Node, NodeType, Tare, TareState
 from sim.planner_rule import RuleBasedPlanner
 
 
@@ -43,6 +43,16 @@ def config_hash(config: dict) -> str:
     return hashlib.sha256(config_str.encode()).hexdigest()[:8]
 
 
+def setup_grid(scenario: dict) -> Grid:
+    """Create grid object from scenario configuration."""
+    grid_config = scenario.get("grid", {})
+    return Grid(
+        width=grid_config.get("width", 30),
+        height=grid_config.get("height", 30),
+        cell_size_m=grid_config.get("cell_size_m", 10.0),
+    )
+
+
 def setup_nodes(scenario: dict) -> dict[str, Node]:
     """Create node objects from scenario configuration."""
     nodes = {}
@@ -51,8 +61,8 @@ def setup_nodes(scenario: dict) -> dict[str, Node]:
         node = Node(
             id=node_data["id"],
             type=node_type,
-            x=float(node_data["x"]),
-            y=float(node_data["y"]),
+            x=int(node_data["x"]),  # Grid cell coordinate (integer)
+            y=int(node_data["y"]),  # Grid cell coordinate (integer)
             name=node_data.get("name"),
         )
         nodes[node.id] = node
@@ -98,15 +108,17 @@ def run_simulation(
     print(f"Initializing simulation: {run_id}")
 
     # Setup
+    grid = setup_grid(scenario)
     nodes = setup_nodes(scenario)
     tares = setup_tares(scenario, config)
 
+    print(f"  Grid: {grid.width}x{grid.height} cells ({grid.cell_size_m}m/cell)")
     print(f"  Nodes: {len(nodes)} ({sum(1 for n in nodes.values() if n.type == NodeType.WHOLESALER)} wholesalers, "
           f"{sum(1 for n in nodes.values() if n.type == NodeType.RETAILER)} retailers)")
     print(f"  Tares: {len(tares)}")
 
-    # Create simulation engine
-    engine = SimulationEngine(run_id, config, nodes, tares)
+    # Create simulation engine with grid
+    engine = SimulationEngine(run_id, config, nodes, tares, grid)
 
     # Create demand generator
     demand_gen = DemandGenerator(scenario, nodes, seed)
