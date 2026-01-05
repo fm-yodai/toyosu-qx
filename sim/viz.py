@@ -122,30 +122,105 @@ def create_grid_animation(
     events_df, _, _ = load_simulation_data(run_id, data_dir)
     events_df = parse_event_payload(events_df)
 
-    # Extract position events
-    position_events = events_df[
+    # Extract movement events (depart and arrive)
+    movement_events = events_df[
         (events_df["event"].isin(["depart", "arrive", "load_start", "unload_start"])) &
         (events_df["tare_id"].notna()) &
         (events_df["node"].notna())
-    ].copy()
+    ].copy().sort_values(["tare_id", "ts"])
 
-    if position_events.empty:
-        print("Warning: No position events found")
+    if movement_events.empty:
+        print("Warning: No movement events found")
         return go.Figure()
 
     # Add grid coordinates
-    position_events["x"] = position_events["node"].map(lambda n: node_coords.get(n, (0, 0))[0])
-    position_events["y"] = position_events["node"].map(lambda n: node_coords.get(n, (0, 0))[1])
+    movement_events["x"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[0])
+    movement_events["y"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[1])
+
+    # Generate Manhattan path waypoints for each tare
+    # When moving from (x1, y1) to (x2, y2), we go: (x1, y1) -> (x2, y1) -> (x2, y2)
+    waypoints = []
+
+    for tare_id in movement_events["tare_id"].unique():
+        tare_events = movement_events[movement_events["tare_id"] == tare_id].sort_values("ts")
+
+        prev_x, prev_y = None, None
+        prev_ts = None
+
+        for _, row in tare_events.iterrows():
+            curr_x, curr_y = row["x"], row["y"]
+            curr_ts = row["ts"]
+
+            if prev_x is not None and (prev_x != curr_x or prev_y != curr_y):
+                # Moving from (prev_x, prev_y) to (curr_x, curr_y)
+                # Calculate intermediate point: first move X, then Y
+                if prev_x != curr_x:
+                    # X-axis movement first
+                    mid_ts = prev_ts + (curr_ts - prev_ts) * 0.5
+                    waypoints.append({
+                        "tare_id": tare_id,
+                        "ts": mid_ts,
+                        "x": curr_x,  # X reached
+                        "y": prev_y,  # Y not yet changed
+                        "node": f"moving",
+                        "state": "traveling",
+                        "load_kg": row.get("load_kg"),
+                    })
+
+            # Add the actual event point
+            waypoints.append({
+                "tare_id": tare_id,
+                "ts": curr_ts,
+                "x": curr_x,
+                "y": curr_y,
+                "node": row["node"],
+                "state": row.get("state", ""),
+                "load_kg": row.get("load_kg"),
+            })
+
+            prev_x, prev_y = curr_x, curr_y
+            prev_ts = curr_ts
+
+    # Create DataFrame from waypoints
+    waypoints_df = pd.DataFrame(waypoints)
 
     # Bin time for animation frames
-    position_events["time_bin"] = (position_events["ts"] // time_bin_sec) * time_bin_sec
-    position_events["time_label"] = position_events["time_bin"].apply(
+    waypoints_df["time_bin"] = (waypoints_df["ts"] // time_bin_sec) * time_bin_sec
+    waypoints_df["time_label"] = waypoints_df["time_bin"].apply(
         lambda t: f"{int(t//3600):02d}:{int((t%3600)//60):02d}"
     )
 
+    # For each time bin, get the last position of each tare
+    position_by_frame = []
+    all_time_bins = sorted(waypoints_df["time_bin"].unique())
+
+    for tare_id in waypoints_df["tare_id"].unique():
+        tare_waypoints = waypoints_df[waypoints_df["tare_id"] == tare_id].sort_values("ts")
+
+        for time_bin in all_time_bins:
+            # Get the last known position at or before this time bin
+            positions_before = tare_waypoints[tare_waypoints["ts"] <= time_bin + time_bin_sec]
+            if not positions_before.empty:
+                last_pos = positions_before.iloc[-1]
+                position_by_frame.append({
+                    "tare_id": tare_id,
+                    "time_bin": time_bin,
+                    "x": last_pos["x"],
+                    "y": last_pos["y"],
+                    "node": last_pos["node"],
+                    "state": last_pos["state"],
+                    "load_kg": last_pos["load_kg"],
+                })
+
+    frame_df = pd.DataFrame(position_by_frame)
+
+    if frame_df.empty:
+        print("Warning: No frame data generated")
+        return go.Figure()
+
     # Create animation
     fig = px.scatter(
-        position_events,
+        frame_df,
         x="x",
         y="y",
         animation_frame="time_bin",
