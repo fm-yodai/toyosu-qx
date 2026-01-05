@@ -255,7 +255,7 @@ def _generate_comprehensive_html(
     # Dashboard
     html_parts.append('<div class="section"><h2>KPI Dashboard</h2>')
     try:
-        fig = create_kpi_dashboard(run_id, str(run_path.parent.parent))
+        fig = create_kpi_dashboard(run_id, str(run_path.parent))
         html_parts.append(fig.to_html(full_html=False, include_plotlyjs="cdn"))
     except Exception as e:
         html_parts.append(f"<p>Error: {e}</p>")
@@ -264,7 +264,7 @@ def _generate_comprehensive_html(
     # Demand Heatmap
     html_parts.append('<div class="section"><h2>Demand Heatmap</h2>')
     try:
-        fig = create_demand_heatmap(run_id, str(run_path.parent.parent))
+        fig = create_demand_heatmap(run_id, str(run_path.parent))
         html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
     except Exception as e:
         html_parts.append(f"<p>Error: {e}</p>")
@@ -273,7 +273,7 @@ def _generate_comprehensive_html(
     # Utilization Heatmap
     html_parts.append('<div class="section"><h2>Tare Utilization Heatmap</h2>')
     try:
-        fig = create_tare_utilization_heatmap(run_id, str(run_path.parent.parent))
+        fig = create_tare_utilization_heatmap(run_id, str(run_path.parent))
         html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
     except Exception as e:
         html_parts.append(f"<p>Error: {e}</p>")
@@ -282,7 +282,7 @@ def _generate_comprehensive_html(
     # Sankey 2-layer
     html_parts.append('<div class="section"><h2>Delivery Flow: Wholesaler → Retailer</h2>')
     try:
-        fig = create_delivery_sankey(run_id, str(run_path.parent.parent), flow_type="2-layer")
+        fig = create_delivery_sankey(run_id, str(run_path.parent), flow_type="2-layer")
         html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
     except Exception as e:
         html_parts.append(f"<p>Error: {e}</p>")
@@ -291,7 +291,7 @@ def _generate_comprehensive_html(
     # Sankey 3-layer
     html_parts.append('<div class="section"><h2>Delivery Flow: Wholesaler → Tare → Retailer</h2>')
     try:
-        fig = create_delivery_sankey(run_id, str(run_path.parent.parent), flow_type="3-layer")
+        fig = create_delivery_sankey(run_id, str(run_path.parent), flow_type="3-layer")
         html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
     except Exception as e:
         html_parts.append(f"<p>Error: {e}</p>")
@@ -308,7 +308,7 @@ def _generate_comprehensive_html(
                 grid_width=grid_config.get("width", 30),
                 grid_height=grid_config.get("height", 30),
                 cell_size_m=grid_config.get("cell_size_m", 10.0),
-                data_dir=str(run_path.parent.parent),
+                data_dir=str(run_path.parent),
             )
             html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
         except Exception as e:
