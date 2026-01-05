@@ -77,6 +77,7 @@ class EventType(Enum):
     LOAD_END = "load_end"
     DEPART = "depart"
     ARRIVE = "arrive"
+    POSITION_UPDATE = "position_update"  # Periodic position during travel
     UNLOAD_START = "unload_start"
     UNLOAD_END = "unload_end"
     TRADE_CONFIRM = "trade_confirm"

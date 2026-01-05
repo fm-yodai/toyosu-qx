@@ -98,7 +98,7 @@ def create_grid_animation(
     grid_width: int = 30,
     grid_height: int = 30,
     cell_size_m: float = 10.0,
-    time_bin_sec: int = 60,
+    time_bin_sec: int = 1,
     data_dir: str = "data/runs",
 ) -> go.Figure:
     """
@@ -107,13 +107,15 @@ def create_grid_animation(
     The grid displays corridors where tares can only move horizontally
     or vertically (Manhattan distance movement).
 
+    Uses POSITION_UPDATE events for precise per-second position tracking.
+
     Args:
         run_id: Simulation run identifier
         node_coords: Dictionary mapping node_id to (x, y) grid cell coordinates
         grid_width: Grid width in cells
         grid_height: Grid height in cells
         cell_size_m: Size of each cell in meters
-        time_bin_sec: Time interval for animation frames (seconds)
+        time_bin_sec: Time interval for animation frames (seconds), default 1
         data_dir: Base directory for run data
 
     Returns:
@@ -122,84 +124,47 @@ def create_grid_animation(
     events_df, _, _ = load_simulation_data(run_id, data_dir)
     events_df = parse_event_payload(events_df)
 
-    # Extract movement events (depart and arrive)
-    movement_events = events_df[
-        (events_df["event"].isin(["depart", "arrive", "load_start", "unload_start"])) &
-        (events_df["tare_id"].notna()) &
-        (events_df["node"].notna())
+    # Extract position events - prioritize position_update for per-second tracking
+    position_events = events_df[
+        (events_df["event"].isin(["position_update", "depart", "arrive", "load_start", "unload_start"])) &
+        (events_df["tare_id"].notna())
     ].copy().sort_values(["tare_id", "ts"])
 
-    if movement_events.empty:
-        print("Warning: No movement events found")
+    if position_events.empty:
+        print("Warning: No position events found")
         return go.Figure()
 
-    # Add grid coordinates
-    movement_events["x"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[0])
-    movement_events["y"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[1])
+    # Extract x, y coordinates from payload (for position_update) or node (for other events)
+    def get_x(row):
+        if row["event"] == "position_update" and isinstance(row.get("payload"), dict):
+            return row["payload"].get("x", 0)
+        elif row.get("node") and row["node"] in node_coords:
+            return node_coords[row["node"]][0]
+        return 0
 
-    # Generate Manhattan path waypoints for each tare
-    # When moving from (x1, y1) to (x2, y2), we go: (x1, y1) -> (x2, y1) -> (x2, y2)
-    waypoints = []
+    def get_y(row):
+        if row["event"] == "position_update" and isinstance(row.get("payload"), dict):
+            return row["payload"].get("y", 0)
+        elif row.get("node") and row["node"] in node_coords:
+            return node_coords[row["node"]][1]
+        return 0
 
-    for tare_id in movement_events["tare_id"].unique():
-        tare_events = movement_events[movement_events["tare_id"] == tare_id].sort_values("ts")
-
-        prev_x, prev_y = None, None
-        prev_ts = None
-
-        for _, row in tare_events.iterrows():
-            curr_x, curr_y = row["x"], row["y"]
-            curr_ts = row["ts"]
-
-            if prev_x is not None and (prev_x != curr_x or prev_y != curr_y):
-                # Moving from (prev_x, prev_y) to (curr_x, curr_y)
-                # Calculate intermediate point: first move X, then Y
-                if prev_x != curr_x:
-                    # X-axis movement first
-                    mid_ts = prev_ts + (curr_ts - prev_ts) * 0.5
-                    waypoints.append({
-                        "tare_id": tare_id,
-                        "ts": mid_ts,
-                        "x": curr_x,  # X reached
-                        "y": prev_y,  # Y not yet changed
-                        "node": f"moving",
-                        "state": "traveling",
-                        "load_kg": row.get("load_kg"),
-                    })
-
-            # Add the actual event point
-            waypoints.append({
-                "tare_id": tare_id,
-                "ts": curr_ts,
-                "x": curr_x,
-                "y": curr_y,
-                "node": row["node"],
-                "state": row.get("state", ""),
-                "load_kg": row.get("load_kg"),
-            })
-
-            prev_x, prev_y = curr_x, curr_y
-            prev_ts = curr_ts
-
-    # Create DataFrame from waypoints
-    waypoints_df = pd.DataFrame(waypoints)
+    position_events["x"] = position_events.apply(get_x, axis=1)
+    position_events["y"] = position_events.apply(get_y, axis=1)
 
     # Bin time for animation frames
-    waypoints_df["time_bin"] = (waypoints_df["ts"] // time_bin_sec) * time_bin_sec
-    waypoints_df["time_label"] = waypoints_df["time_bin"].apply(
-        lambda t: f"{int(t//3600):02d}:{int((t%3600)//60):02d}"
-    )
+    position_events["time_bin"] = (position_events["ts"] // time_bin_sec).astype(int) * time_bin_sec
 
     # For each time bin, get the last position of each tare
     position_by_frame = []
-    all_time_bins = sorted(waypoints_df["time_bin"].unique())
+    all_time_bins = sorted(position_events["time_bin"].unique())
 
-    for tare_id in waypoints_df["tare_id"].unique():
-        tare_waypoints = waypoints_df[waypoints_df["tare_id"] == tare_id].sort_values("ts")
+    for tare_id in position_events["tare_id"].unique():
+        tare_positions = position_events[position_events["tare_id"] == tare_id].sort_values("ts")
 
         for time_bin in all_time_bins:
             # Get the last known position at or before this time bin
-            positions_before = tare_waypoints[tare_waypoints["ts"] <= time_bin + time_bin_sec]
+            positions_before = tare_positions[tare_positions["ts"] <= time_bin + time_bin_sec]
             if not positions_before.empty:
                 last_pos = positions_before.iloc[-1]
                 position_by_frame.append({
@@ -207,9 +172,8 @@ def create_grid_animation(
                     "time_bin": time_bin,
                     "x": last_pos["x"],
                     "y": last_pos["y"],
-                    "node": last_pos["node"],
-                    "state": last_pos["state"],
-                    "load_kg": last_pos["load_kg"],
+                    "state": last_pos.get("state", ""),
+                    "load_kg": last_pos.get("load_kg"),
                 })
 
     frame_df = pd.DataFrame(position_by_frame)
@@ -228,11 +192,10 @@ def create_grid_animation(
         color="tare_id",
         hover_name="tare_id",
         hover_data={
-            "node": True,
             "state": True,
             "load_kg": True,
-            "x": ":.0f",
-            "y": ":.0f",
+            "x": ":.2f",
+            "y": ":.2f",
             "time_bin": False,
         },
         title=f"Tare Movement on Grid: {run_id}",

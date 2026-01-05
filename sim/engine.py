@@ -132,6 +132,108 @@ class SimulationEngine:
         """
         return self.alpha_load * weight_kg + self.beta_load
 
+    def calculate_position_at_time(
+        self,
+        origin_id: str,
+        dest_id: str,
+        elapsed_sec: float,
+        total_travel_sec: float,
+    ) -> tuple[float, float]:
+        """
+        Calculate position along Manhattan path at a given time.
+
+        Movement follows Manhattan distance: first X-axis, then Y-axis.
+
+        Args:
+            origin_id: Origin node ID
+            dest_id: Destination node ID
+            elapsed_sec: Time elapsed since departure
+            total_travel_sec: Total travel time
+
+        Returns:
+            (x, y) position as floats (can be fractional during movement)
+        """
+        origin = self.nodes[origin_id]
+        dest = self.nodes[dest_id]
+
+        # Calculate progress (0.0 to 1.0)
+        progress = min(elapsed_sec / total_travel_sec, 1.0) if total_travel_sec > 0 else 1.0
+
+        # Manhattan path: first X, then Y
+        dx = dest.x - origin.x
+        dy = dest.y - origin.y
+        total_dist = abs(dx) + abs(dy)
+
+        if total_dist == 0:
+            return float(origin.x), float(origin.y)
+
+        # Distance traveled so far
+        dist_traveled = progress * total_dist
+
+        # First move in X direction
+        x_dist = abs(dx)
+        if dist_traveled <= x_dist:
+            # Still moving in X direction
+            x_progress = dist_traveled / x_dist if x_dist > 0 else 1.0
+            new_x = origin.x + (dx * x_progress) if dx != 0 else origin.x
+            new_y = float(origin.y)
+        else:
+            # X complete, now moving in Y direction
+            new_x = float(dest.x)
+            y_dist = abs(dy)
+            y_traveled = dist_traveled - x_dist
+            y_progress = y_traveled / y_dist if y_dist > 0 else 1.0
+            new_y = origin.y + (dy * y_progress) if dy != 0 else origin.y
+
+        return new_x, new_y
+
+    def travel_with_position_logging(
+        self,
+        tare: Tare,
+        origin_id: str,
+        dest_id: str,
+        load_kg: float,
+    ) -> Any:
+        """
+        SimPy process for traveling with position logged every second.
+
+        Args:
+            tare: Tare truck
+            origin_id: Origin node ID
+            dest_id: Destination node ID
+            load_kg: Current load weight
+
+        Yields:
+            SimPy events
+        """
+        dist = self.distance(origin_id, dest_id)
+        total_travel_sec = self.travel_time(dist)
+
+        # Log position every second during travel
+        elapsed = 0.0
+        while elapsed < total_travel_sec:
+            # Calculate current position
+            x, y = self.calculate_position_at_time(origin_id, dest_id, elapsed, total_travel_sec)
+
+            self.log_event(
+                EventType.POSITION_UPDATE,
+                tare_id=tare.id,
+                state=tare.state,
+                load_kg=load_kg,
+                payload={
+                    "x": round(x, 2),
+                    "y": round(y, 2),
+                    "origin": origin_id,
+                    "destination": dest_id,
+                    "progress": round(elapsed / total_travel_sec, 3) if total_travel_sec > 0 else 1.0,
+                },
+            )
+
+            # Wait 1 second (or remaining time if less than 1 second)
+            wait_time = min(1.0, total_travel_sec - elapsed)
+            yield self.env.timeout(wait_time)
+            elapsed += wait_time
+
     def tare_process(self, tare: Tare, orders: list[Order], destination: str) -> Any:
         """
         SimPy process for a tare delivery trip.
@@ -182,7 +284,6 @@ class SimulationEngine:
         # Phase 2: Travel to destination
         origin = tare.current_node
         dist = self.distance(origin, destination)
-        travel_duration = self.travel_time(dist)
 
         tare.state = TareState.TRAVELING
         tare.last_state_change = self.env.now
@@ -196,7 +297,8 @@ class SimulationEngine:
             payload={"destination": destination, "distance_m": dist},
         )
 
-        yield self.env.timeout(travel_duration)
+        # Travel with position logging every second
+        yield from self.travel_with_position_logging(tare, origin, destination, total_weight)
 
         tare.current_node = destination
         self.log_event(
@@ -256,7 +358,6 @@ class SimulationEngine:
 
         # Phase 5: Return to wholesaler
         return_dist = self.distance(destination, tare.home)
-        return_travel = self.travel_time(return_dist)
 
         tare.state = TareState.TRAVELING
         tare.last_state_change = self.env.now
@@ -270,7 +371,8 @@ class SimulationEngine:
             payload={"destination": tare.home, "distance_m": return_dist},
         )
 
-        yield self.env.timeout(return_travel)
+        # Travel with position logging every second
+        yield from self.travel_with_position_logging(tare, destination, tare.home, 0.0)
 
         tare.current_node = tare.home
         tare.state = TareState.IDLE

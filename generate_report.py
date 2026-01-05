@@ -161,7 +161,7 @@ def generate_report(run_id: str, scenario_path: str | None = None, data_dir: str
 
     # 6. Tare Grid Animation (only if node coordinates available)
     if node_coords:
-        print("6. Creating tare grid animation...")
+        print("6. Creating tare grid animation (1-second granularity)...")
         try:
             fig_anim = create_grid_animation(
                 run_id,
@@ -169,6 +169,7 @@ def generate_report(run_id: str, scenario_path: str | None = None, data_dir: str
                 grid_width=grid_config["width"],
                 grid_height=grid_config["height"],
                 cell_size_m=grid_config["cell_size_m"],
+                time_bin_sec=1,  # 1-second granularity
                 data_dir=data_dir,
             )
             anim_path = run_path / "animation_grid.html"
@@ -299,8 +300,8 @@ def _generate_comprehensive_html(
 
     # Grid Animation (if available)
     if node_coords:
-        html_parts.append('<div class="section"><h2>Tare Movement on Grid</h2>')
-        html_parts.append('<p>Tares move along corridors (horizontal/vertical only - Manhattan distance)</p>')
+        html_parts.append('<div class="section"><h2>Tare Movement on Grid (1-second granularity)</h2>')
+        html_parts.append('<p>Tares move along corridors (horizontal/vertical only - Manhattan distance). Position recorded every second.</p>')
         try:
             fig = create_grid_animation(
                 run_id,
@@ -308,6 +309,7 @@ def _generate_comprehensive_html(
                 grid_width=grid_config.get("width", 30),
                 grid_height=grid_config.get("height", 30),
                 cell_size_m=grid_config.get("cell_size_m", 10.0),
+                time_bin_sec=1,  # 1-second granularity
                 data_dir=str(run_path.parent.parent),
             )
             html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
