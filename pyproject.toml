@@ -10,6 +10,8 @@ dependencies = [
     "pyarrow>=22.0.0",
     "pyyaml>=6.0.3",
     "simpy>=4.1.1",
+    "kaleido>=0.2.1",
+    "pillow>=10.0.0",
 ]
 
 [dependency-groups]

@@ -15,12 +15,17 @@ from pathlib import Path
 import yaml
 
 from sim.viz import (
+    create_animation_gif,
     create_demand_heatmap,
     create_delivery_sankey,
     create_grid_animation,
+    create_grid_animation_lightweight,
     create_kpi_dashboard,
     create_tare_animation,
     create_tare_utilization_heatmap,
+    generate_animation_frames,
+    generate_summary_image,
+    save_figure_as_image,
 )
 
 
@@ -328,9 +333,321 @@ def _generate_comprehensive_html(
         f.write("\n".join(html_parts))
 
 
+def generate_image_report(
+    run_id: str,
+    scenario_path: str | None = None,
+    data_dir: str = "data/runs",
+) -> None:
+    """
+    Generate image-based report (PNG files) for a simulation run.
+
+    This creates lightweight static images instead of heavy HTML files.
+    Output size: ~500KB-2MB total (vs 100MB+ for HTML)
+
+    Args:
+        run_id: Simulation run identifier
+        scenario_path: Path to scenario file (for node coordinates)
+        data_dir: Base directory for run data
+    """
+    run_path = Path(data_dir) / run_id
+
+    if not run_path.exists():
+        print(f"Error: Run directory not found: {run_path}")
+        sys.exit(1)
+
+    print(f"Generating IMAGE report for: {run_id}")
+
+    # Load node coordinates
+    node_coords = {}
+    grid_config = {"width": 30, "height": 30, "cell_size_m": 10.0}
+    if scenario_path and Path(scenario_path).exists():
+        node_coords = load_node_coordinates(scenario_path)
+        grid_config = load_grid_config(scenario_path)
+
+    # Create images directory
+    images_dir = run_path / "images"
+    images_dir.mkdir(exist_ok=True)
+
+    print("\n=== Generating PNG Images ===")
+
+    # 1. KPI Dashboard
+    print("1. Creating KPI dashboard image...")
+    try:
+        fig = create_kpi_dashboard(run_id, data_dir)
+        save_figure_as_image(fig, images_dir / "dashboard.png", width=1400, height=800)
+        print(f"   Saved: {images_dir / 'dashboard.png'}")
+    except Exception as e:
+        print(f"   Error: {e}")
+
+    # 2. Demand Heatmap
+    print("2. Creating demand heatmap image...")
+    try:
+        fig = create_demand_heatmap(run_id, data_dir)
+        save_figure_as_image(fig, images_dir / "heatmap_demand.png", width=1000, height=500)
+        print(f"   Saved: {images_dir / 'heatmap_demand.png'}")
+    except Exception as e:
+        print(f"   Error: {e}")
+
+    # 3. Tare Utilization Heatmap
+    print("3. Creating utilization heatmap image...")
+    try:
+        fig = create_tare_utilization_heatmap(run_id, data_dir)
+        save_figure_as_image(fig, images_dir / "heatmap_utilization.png", width=1200, height=400)
+        print(f"   Saved: {images_dir / 'heatmap_utilization.png'}")
+    except Exception as e:
+        print(f"   Error: {e}")
+
+    # 4. Sankey Diagrams
+    print("4. Creating Sankey diagram images...")
+    try:
+        fig = create_delivery_sankey(run_id, data_dir, flow_type="2-layer")
+        save_figure_as_image(fig, images_dir / "sankey_2layer.png", width=1000, height=600)
+        print(f"   Saved: {images_dir / 'sankey_2layer.png'}")
+    except Exception as e:
+        print(f"   Error: {e}")
+
+    try:
+        fig = create_delivery_sankey(run_id, data_dir, flow_type="3-layer")
+        save_figure_as_image(fig, images_dir / "sankey_3layer.png", width=1000, height=700)
+        print(f"   Saved: {images_dir / 'sankey_3layer.png'}")
+    except Exception as e:
+        print(f"   Error: {e}")
+
+    # 5. Movement Summary Image
+    if node_coords:
+        print("5. Creating movement summary image...")
+        try:
+            generate_summary_image(
+                run_id,
+                node_coords,
+                images_dir / "movement_summary.png",
+                grid_width=grid_config["width"],
+                grid_height=grid_config["height"],
+                data_dir=data_dir,
+            )
+        except Exception as e:
+            print(f"   Error: {e}")
+
+    # Calculate total size
+    total_size = sum(f.stat().st_size for f in images_dir.glob("*.png"))
+    print(f"\nTotal image size: {total_size / 1024:.1f} KB")
+    print(f"Images saved to: {images_dir}")
+
+
+def generate_gif_animation(
+    run_id: str,
+    scenario_path: str | None = None,
+    data_dir: str = "data/runs",
+    frame_skip: int = 10,
+    fps: int = 5,
+) -> None:
+    """
+    Generate GIF animation for tare movements.
+
+    Output size: ~5-20MB (vs 50-100MB for HTML animation)
+
+    Args:
+        run_id: Simulation run identifier
+        scenario_path: Path to scenario file (for node coordinates)
+        data_dir: Base directory for run data
+        frame_skip: Generate every Nth frame to reduce size
+        fps: Frames per second for GIF
+    """
+    run_path = Path(data_dir) / run_id
+
+    if not run_path.exists():
+        print(f"Error: Run directory not found: {run_path}")
+        sys.exit(1)
+
+    # Load node coordinates
+    node_coords = {}
+    grid_config = {"width": 30, "height": 30, "cell_size_m": 10.0}
+    if scenario_path and Path(scenario_path).exists():
+        node_coords = load_node_coordinates(scenario_path)
+        grid_config = load_grid_config(scenario_path)
+    else:
+        print("Error: Scenario file required for animation")
+        return
+
+    print(f"Generating GIF animation for: {run_id}")
+
+    # Create frames directory
+    frames_dir = run_path / "frames"
+    frames_dir.mkdir(exist_ok=True)
+
+    # Generate frames
+    print("Generating animation frames...")
+    frame_paths = generate_animation_frames(
+        run_id,
+        node_coords,
+        frames_dir,
+        grid_width=grid_config["width"],
+        grid_height=grid_config["height"],
+        frame_skip=frame_skip,
+        data_dir=data_dir,
+    )
+
+    if frame_paths:
+        # Create GIF
+        gif_path = run_path / "animation.gif"
+        print(f"Creating GIF from {len(frame_paths)} frames...")
+        create_animation_gif(frame_paths, gif_path, fps=fps)
+
+        # Report size
+        gif_size = gif_path.stat().st_size / (1024 * 1024)
+        print(f"GIF size: {gif_size:.1f} MB")
+
+        # Clean up frames (optional)
+        print("Cleaning up frame files...")
+        for frame in frame_paths:
+            frame.unlink()
+        frames_dir.rmdir()
+
+
+def generate_lightweight_report(
+    run_id: str,
+    scenario_path: str | None = None,
+    data_dir: str = "data/runs",
+) -> None:
+    """
+    Generate lightweight HTML report with sampled data.
+
+    Optimizations:
+    - Animation uses 5-minute bins instead of 1-minute (5x fewer frames)
+    - Maximum 100 animation frames
+    - Simplified hover data
+    - Single consolidated HTML file
+
+    Output size: ~5-10MB (vs 100MB+ for full report)
+
+    Args:
+        run_id: Simulation run identifier
+        scenario_path: Path to scenario file (for node coordinates)
+        data_dir: Base directory for run data
+    """
+    run_path = Path(data_dir) / run_id
+
+    if not run_path.exists():
+        print(f"Error: Run directory not found: {run_path}")
+        sys.exit(1)
+
+    print(f"Generating LIGHTWEIGHT HTML report for: {run_id}")
+
+    # Load node coordinates
+    node_coords = {}
+    grid_config = {"width": 30, "height": 30, "cell_size_m": 10.0}
+    if scenario_path and Path(scenario_path).exists():
+        node_coords = load_node_coordinates(scenario_path)
+        grid_config = load_grid_config(scenario_path)
+
+    html_parts = []
+
+    # Header
+    html_parts.append(
+        f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Simulation Report (Lightweight): {run_id}</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}
+        h1 {{ color: #333; border-bottom: 3px solid #1f77b4; padding-bottom: 10px; }}
+        h2 {{ color: #555; margin-top: 40px; border-bottom: 2px solid #ccc; padding-bottom: 5px; }}
+        .section {{ background-color: white; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+        .note {{ color: #666; font-size: 0.9em; font-style: italic; }}
+    </style>
+</head>
+<body>
+    <h1>Toyosu-QX Simulation Report (Lightweight)</h1>
+    <p>Run ID: <strong>{run_id}</strong></p>
+    <p class="note">This is a lightweight version with reduced data for faster loading.</p>
+"""
+    )
+
+    # KPI Dashboard
+    print("1. Adding KPI dashboard...")
+    html_parts.append('<div class="section"><h2>KPI Dashboard</h2>')
+    try:
+        fig = create_kpi_dashboard(run_id, data_dir)
+        html_parts.append(fig.to_html(full_html=False, include_plotlyjs="cdn"))
+    except Exception as e:
+        html_parts.append(f"<p>Error: {e}</p>")
+    html_parts.append("</div>")
+
+    # Demand Heatmap
+    print("2. Adding demand heatmap...")
+    html_parts.append('<div class="section"><h2>Demand Heatmap</h2>')
+    try:
+        fig = create_demand_heatmap(run_id, data_dir)
+        html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
+    except Exception as e:
+        html_parts.append(f"<p>Error: {e}</p>")
+    html_parts.append("</div>")
+
+    # Sankey (2-layer only for lightweight)
+    print("3. Adding delivery flow diagram...")
+    html_parts.append('<div class="section"><h2>Delivery Flow</h2>')
+    try:
+        fig = create_delivery_sankey(run_id, data_dir, flow_type="2-layer")
+        html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
+    except Exception as e:
+        html_parts.append(f"<p>Error: {e}</p>")
+    html_parts.append("</div>")
+
+    # Lightweight Animation (if coordinates available)
+    if node_coords:
+        print("4. Adding lightweight animation...")
+        html_parts.append('<div class="section"><h2>Tare Movement (Sampled)</h2>')
+        html_parts.append('<p class="note">Animation sampled at 5-minute intervals (max 100 frames)</p>')
+        try:
+            fig = create_grid_animation_lightweight(
+                run_id,
+                node_coords,
+                grid_width=grid_config["width"],
+                grid_height=grid_config["height"],
+                time_bin_sec=300,  # 5 minutes
+                max_frames=100,
+                data_dir=data_dir,
+            )
+            html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
+        except Exception as e:
+            html_parts.append(f"<p>Error: {e}</p>")
+        html_parts.append("</div>")
+
+    # Footer
+    html_parts.append("</body></html>")
+
+    # Write file
+    output_path = run_path / "report_lightweight.html"
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(html_parts))
+
+    # Report size
+    file_size = output_path.stat().st_size / (1024 * 1024)
+    print(f"\nLightweight report size: {file_size:.1f} MB")
+    print(f"Saved to: {output_path}")
+
+
 def main() -> None:
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Generate visualization report for simulation results")
+    parser = argparse.ArgumentParser(
+        description="Generate visualization report for simulation results",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Output formats:
+  html        Full HTML report with all visualizations (default, ~100MB+)
+  image       PNG images only (~500KB-2MB total)
+  gif         GIF animation + summary image (~5-20MB)
+  lightweight Lightweight HTML with sampled data (~5-10MB)
+  all         Generate all formats
+
+Examples:
+  python generate_report.py RUN_ID --scenario config/scenario/default.yaml
+  python generate_report.py RUN_ID --scenario config/scenario/default.yaml --output-format image
+  python generate_report.py RUN_ID --scenario config/scenario/default.yaml --output-format lightweight
+        """,
+    )
     parser.add_argument("run_id", help="Simulation run ID (e.g., 2025-11-11_084402Z)")
     parser.add_argument(
         "--scenario",
@@ -342,10 +659,38 @@ def main() -> None:
         default="data/runs",
         help="Base directory for run data",
     )
+    parser.add_argument(
+        "--output-format",
+        choices=["html", "image", "gif", "lightweight", "all"],
+        default="html",
+        help="Output format (default: html)",
+    )
 
     args = parser.parse_args()
 
-    generate_report(args.run_id, args.scenario, args.data_dir)
+    if args.output_format == "html":
+        generate_report(args.run_id, args.scenario, args.data_dir)
+    elif args.output_format == "image":
+        generate_image_report(args.run_id, args.scenario, args.data_dir)
+    elif args.output_format == "gif":
+        generate_gif_animation(args.run_id, args.scenario, args.data_dir)
+    elif args.output_format == "lightweight":
+        generate_lightweight_report(args.run_id, args.scenario, args.data_dir)
+    elif args.output_format == "all":
+        print("=" * 60)
+        print("Generating ALL output formats")
+        print("=" * 60)
+        print("\n[1/4] Full HTML Report")
+        generate_report(args.run_id, args.scenario, args.data_dir)
+        print("\n[2/4] PNG Images")
+        generate_image_report(args.run_id, args.scenario, args.data_dir)
+        print("\n[3/4] GIF Animation")
+        generate_gif_animation(args.run_id, args.scenario, args.data_dir)
+        print("\n[4/4] Lightweight HTML")
+        generate_lightweight_report(args.run_id, args.scenario, args.data_dir)
+        print("\n" + "=" * 60)
+        print("All formats generated successfully!")
+        print("=" * 60)
 
 
 if __name__ == "__main__":

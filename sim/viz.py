@@ -908,3 +908,474 @@ def _calculate_deliveries_by_hour(events_df: pd.DataFrame) -> pd.DataFrame:
     deliveries_by_hour = deliveries.groupby("hour").size().reset_index(name="count")
 
     return deliveries_by_hour
+
+
+# ============================================================================
+# Lightweight Output: Image and Video Export
+# ============================================================================
+
+def save_figure_as_image(
+    fig: go.Figure,
+    output_path: str | Path,
+    format: str = "png",
+    width: int = 1200,
+    height: int = 800,
+    scale: float = 2.0,
+) -> None:
+    """
+    Save a Plotly figure as a static image.
+
+    Args:
+        fig: Plotly Figure object
+        output_path: Output file path
+        format: Image format ('png', 'svg', 'pdf', 'webp')
+        width: Image width in pixels
+        height: Image height in pixels
+        scale: Scale factor for higher resolution
+    """
+    fig.write_image(
+        str(output_path),
+        format=format,
+        width=width,
+        height=height,
+        scale=scale,
+    )
+
+
+def create_grid_animation_lightweight(
+    run_id: str,
+    node_coords: dict[str, tuple[int, int]],
+    grid_width: int = 30,
+    grid_height: int = 30,
+    cell_size_m: float = 10.0,
+    time_bin_sec: int = 300,  # 5 minutes instead of 60 seconds (reduces frames by 5x)
+    max_frames: int = 100,  # Limit maximum frames
+    data_dir: str = "data/runs",
+) -> go.Figure:
+    """
+    Create a lightweight animated scatter plot with reduced data.
+
+    Optimizations:
+    - Larger time bins (5 minutes instead of 1 minute)
+    - Maximum frame limit
+    - Simplified hover data
+
+    Args:
+        run_id: Simulation run identifier
+        node_coords: Dictionary mapping node_id to (x, y) grid cell coordinates
+        grid_width: Grid width in cells
+        grid_height: Grid height in cells
+        cell_size_m: Size of each cell in meters
+        time_bin_sec: Time interval for animation frames (seconds)
+        max_frames: Maximum number of animation frames
+        data_dir: Base directory for run data
+
+    Returns:
+        Plotly Figure with animation on grid background
+    """
+    events_df, _, _ = load_simulation_data(run_id, data_dir)
+    events_df = parse_event_payload(events_df)
+
+    # Extract movement events
+    movement_events = events_df[
+        (events_df["event"].isin(["depart", "arrive", "load_start", "unload_start"])) &
+        (events_df["tare_id"].notna()) &
+        (events_df["node"].notna())
+    ].copy().sort_values(["tare_id", "ts"])
+
+    if movement_events.empty:
+        print("Warning: No movement events found")
+        return go.Figure()
+
+    # Add grid coordinates
+    movement_events["x"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[0])
+    movement_events["y"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[1])
+
+    # Bin time for animation frames (larger bins for fewer frames)
+    movement_events["time_bin"] = (movement_events["ts"] // time_bin_sec) * time_bin_sec
+
+    # Limit frames
+    unique_bins = sorted(movement_events["time_bin"].unique())
+    if len(unique_bins) > max_frames:
+        step = len(unique_bins) // max_frames
+        selected_bins = unique_bins[::step][:max_frames]
+        movement_events = movement_events[movement_events["time_bin"].isin(selected_bins)]
+
+    # For each time bin, get the last position of each tare
+    position_by_frame = []
+    all_time_bins = sorted(movement_events["time_bin"].unique())
+
+    for tare_id in movement_events["tare_id"].unique():
+        tare_events = movement_events[movement_events["tare_id"] == tare_id].sort_values("ts")
+
+        for time_bin in all_time_bins:
+            positions_before = tare_events[tare_events["ts"] <= time_bin + time_bin_sec]
+            if not positions_before.empty:
+                last_pos = positions_before.iloc[-1]
+                position_by_frame.append({
+                    "tare_id": tare_id,
+                    "time_bin": time_bin,
+                    "x": last_pos["x"],
+                    "y": last_pos["y"],
+                })
+
+    frame_df = pd.DataFrame(position_by_frame)
+
+    if frame_df.empty:
+        print("Warning: No frame data generated")
+        return go.Figure()
+
+    # Create animation (simplified hover data)
+    fig = px.scatter(
+        frame_df,
+        x="x",
+        y="y",
+        animation_frame="time_bin",
+        animation_group="tare_id",
+        color="tare_id",
+        hover_name="tare_id",
+        title=f"Tare Movement on Grid: {run_id}",
+        labels={"x": "X (grid cell)", "y": "Y (grid cell)"},
+    )
+
+    # Add grid lines (simplified - fewer lines)
+    for i in range(0, grid_width + 1, 5):
+        fig.add_shape(
+            type="line",
+            x0=i - 0.5, y0=-0.5, x1=i - 0.5, y1=grid_height - 0.5,
+            line=dict(color="lightgray", width=1),
+            layer="below",
+        )
+    for j in range(0, grid_height + 1, 5):
+        fig.add_shape(
+            type="line",
+            x0=-0.5, y0=j - 0.5, x1=grid_width - 0.5, y1=j - 0.5,
+            line=dict(color="lightgray", width=1),
+            layer="below",
+        )
+
+    # Set fixed axis ranges
+    fig.update_xaxes(range=[-1, grid_width], dtick=5, showgrid=False)
+    fig.update_yaxes(range=[-1, grid_height], dtick=5, showgrid=False)
+    fig.update_layout(
+        width=800,
+        height=800,
+        xaxis=dict(scaleanchor="y", scaleratio=1),
+    )
+
+    # Add node markers (wholesalers and retailers)
+    wholesalers = {n: c for n, c in node_coords.items() if n.startswith("W")}
+    retailers = {n: c for n, c in node_coords.items() if n.startswith("R")}
+
+    for node_id, (x, y) in wholesalers.items():
+        fig.add_trace(
+            go.Scatter(
+                x=[x], y=[y],
+                mode="markers",
+                marker=dict(size=15, color="blue", symbol="square", opacity=0.7),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    for node_id, (x, y) in retailers.items():
+        fig.add_trace(
+            go.Scatter(
+                x=[x], y=[y],
+                mode="markers",
+                marker=dict(size=12, color="green", symbol="diamond", opacity=0.7),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    return fig
+
+
+def generate_animation_frames(
+    run_id: str,
+    node_coords: dict[str, tuple[int, int]],
+    output_dir: str | Path,
+    grid_width: int = 30,
+    grid_height: int = 30,
+    time_bin_sec: int = 60,
+    frame_skip: int = 5,  # Only generate every Nth frame
+    data_dir: str = "data/runs",
+) -> list[Path]:
+    """
+    Generate individual PNG frames for animation.
+
+    Args:
+        run_id: Simulation run identifier
+        node_coords: Dictionary mapping node_id to (x, y) grid cell coordinates
+        output_dir: Directory to save frame images
+        grid_width: Grid width in cells
+        grid_height: Grid height in cells
+        time_bin_sec: Time interval for frames
+        frame_skip: Generate every Nth frame to reduce output
+        data_dir: Base directory for run data
+
+    Returns:
+        List of generated frame file paths
+    """
+    from PIL import Image
+    import io
+
+    events_df, _, _ = load_simulation_data(run_id, data_dir)
+    events_df = parse_event_payload(events_df)
+
+    # Extract movement events
+    movement_events = events_df[
+        (events_df["event"].isin(["depart", "arrive", "load_start", "unload_start"])) &
+        (events_df["tare_id"].notna()) &
+        (events_df["node"].notna())
+    ].copy().sort_values(["tare_id", "ts"])
+
+    if movement_events.empty:
+        print("Warning: No movement events found")
+        return []
+
+    # Add coordinates
+    movement_events["x"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[0])
+    movement_events["y"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[1])
+    movement_events["time_bin"] = (movement_events["ts"] // time_bin_sec) * time_bin_sec
+
+    # Prepare output directory
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get unique time bins (with skip)
+    all_time_bins = sorted(movement_events["time_bin"].unique())
+    selected_bins = all_time_bins[::frame_skip]
+
+    # Tare info
+    tare_ids = movement_events["tare_id"].unique()
+
+    # Node markers (static)
+    wholesalers = {n: c for n, c in node_coords.items() if n.startswith("W")}
+    retailers = {n: c for n, c in node_coords.items() if n.startswith("R")}
+
+    frame_paths = []
+
+    for frame_idx, time_bin in enumerate(selected_bins):
+        # Get positions for this time bin
+        positions = []
+        for tare_id in tare_ids:
+            tare_events = movement_events[
+                (movement_events["tare_id"] == tare_id) &
+                (movement_events["ts"] <= time_bin + time_bin_sec)
+            ]
+            if not tare_events.empty:
+                last = tare_events.iloc[-1]
+                positions.append({
+                    "tare_id": tare_id,
+                    "x": last["x"],
+                    "y": last["y"],
+                })
+
+        if not positions:
+            continue
+
+        pos_df = pd.DataFrame(positions)
+
+        # Create figure for this frame
+        fig = go.Figure()
+
+        # Add tare positions
+        fig.add_trace(
+            go.Scatter(
+                x=pos_df["x"],
+                y=pos_df["y"],
+                mode="markers",
+                marker=dict(size=12, color="red"),
+                text=pos_df["tare_id"],
+                hoverinfo="text",
+            )
+        )
+
+        # Add wholesaler markers
+        for node_id, (x, y) in wholesalers.items():
+            fig.add_trace(
+                go.Scatter(
+                    x=[x], y=[y],
+                    mode="markers",
+                    marker=dict(size=15, color="blue", symbol="square", opacity=0.7),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+
+        # Add retailer markers
+        for node_id, (x, y) in retailers.items():
+            fig.add_trace(
+                go.Scatter(
+                    x=[x], y=[y],
+                    mode="markers",
+                    marker=dict(size=12, color="green", symbol="diamond", opacity=0.7),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+
+        # Format time label
+        time_label = f"{int(time_bin//3600):02d}:{int((time_bin%3600)//60):02d}"
+
+        fig.update_layout(
+            title=f"Tare Movement - {time_label}",
+            xaxis=dict(range=[-1, grid_width], dtick=5, showgrid=True, scaleanchor="y"),
+            yaxis=dict(range=[-1, grid_height], dtick=5, showgrid=True),
+            width=800,
+            height=800,
+            showlegend=False,
+        )
+
+        # Save frame
+        frame_path = output_dir / f"frame_{frame_idx:04d}.png"
+        fig.write_image(str(frame_path), scale=1.5)
+        frame_paths.append(frame_path)
+
+        if frame_idx % 10 == 0:
+            print(f"  Generated frame {frame_idx + 1}/{len(selected_bins)}")
+
+    return frame_paths
+
+
+def create_animation_gif(
+    frame_paths: list[Path],
+    output_path: str | Path,
+    fps: int = 5,
+) -> None:
+    """
+    Create GIF animation from frame images.
+
+    Args:
+        frame_paths: List of frame image paths
+        output_path: Output GIF file path
+        fps: Frames per second
+    """
+    from PIL import Image
+
+    if not frame_paths:
+        print("Warning: No frames to create animation")
+        return
+
+    frames = []
+    for path in frame_paths:
+        img = Image.open(path)
+        frames.append(img.copy())
+        img.close()
+
+    # Save as GIF
+    duration = int(1000 / fps)  # milliseconds per frame
+    frames[0].save(
+        str(output_path),
+        save_all=True,
+        append_images=frames[1:],
+        duration=duration,
+        loop=0,
+    )
+    print(f"Created GIF animation: {output_path}")
+
+
+def generate_summary_image(
+    run_id: str,
+    node_coords: dict[str, tuple[int, int]],
+    output_path: str | Path,
+    grid_width: int = 30,
+    grid_height: int = 30,
+    data_dir: str = "data/runs",
+) -> None:
+    """
+    Generate a single summary image showing:
+    - Node positions
+    - All tare movement paths (as lines)
+    - Start/end positions
+
+    Args:
+        run_id: Simulation run identifier
+        node_coords: Dictionary mapping node_id to (x, y) coordinates
+        output_path: Output image file path
+        grid_width: Grid width in cells
+        grid_height: Grid height in cells
+        data_dir: Base directory for run data
+    """
+    events_df, _, _ = load_simulation_data(run_id, data_dir)
+    events_df = parse_event_payload(events_df)
+
+    # Extract movement events
+    movement_events = events_df[
+        (events_df["event"].isin(["depart", "arrive"])) &
+        (events_df["tare_id"].notna()) &
+        (events_df["node"].notna())
+    ].copy().sort_values(["tare_id", "ts"])
+
+    if movement_events.empty:
+        print("Warning: No movement events found")
+        return
+
+    # Add coordinates
+    movement_events["x"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[0])
+    movement_events["y"] = movement_events["node"].map(lambda n: node_coords.get(n, (0, 0))[1])
+
+    fig = go.Figure()
+
+    # Draw movement paths for each tare
+    colors = px.colors.qualitative.Plotly
+    for i, tare_id in enumerate(movement_events["tare_id"].unique()):
+        tare_events = movement_events[movement_events["tare_id"] == tare_id].sort_values("ts")
+        color = colors[i % len(colors)]
+
+        # Add path line
+        fig.add_trace(
+            go.Scatter(
+                x=tare_events["x"],
+                y=tare_events["y"],
+                mode="lines",
+                line=dict(color=color, width=1.5),
+                opacity=0.5,
+                name=tare_id,
+                showlegend=True,
+            )
+        )
+
+    # Add node markers
+    wholesalers = {n: c for n, c in node_coords.items() if n.startswith("W")}
+    retailers = {n: c for n, c in node_coords.items() if n.startswith("R")}
+
+    for node_id, (x, y) in wholesalers.items():
+        fig.add_trace(
+            go.Scatter(
+                x=[x], y=[y],
+                mode="markers+text",
+                marker=dict(size=18, color="blue", symbol="square", opacity=0.8),
+                text=[node_id],
+                textposition="top center",
+                textfont=dict(size=8),
+                showlegend=False,
+            )
+        )
+
+    for node_id, (x, y) in retailers.items():
+        fig.add_trace(
+            go.Scatter(
+                x=[x], y=[y],
+                mode="markers+text",
+                marker=dict(size=14, color="green", symbol="diamond", opacity=0.8),
+                text=[node_id],
+                textposition="top center",
+                textfont=dict(size=8),
+                showlegend=False,
+            )
+        )
+
+    fig.update_layout(
+        title=f"Tare Movement Summary: {run_id}",
+        xaxis=dict(range=[-1, grid_width], dtick=5, showgrid=True, scaleanchor="y"),
+        yaxis=dict(range=[-1, grid_height], dtick=5, showgrid=True),
+        width=1000,
+        height=1000,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+
+    fig.write_image(str(output_path), scale=2.0)
+    print(f"Created summary image: {output_path}")
