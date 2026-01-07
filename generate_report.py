@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -27,6 +28,56 @@ from sim.viz import (
     generate_summary_image,
     save_figure_as_image,
 )
+
+
+def check_chrome_available() -> bool:
+    """
+    Check if Chrome is available for image export.
+
+    Returns:
+        True if Chrome is available, False otherwise
+    """
+    try:
+        import kaleido
+        # Try to check if Chrome is installed
+        # kaleido stores Chrome in its package directory
+        chrome_path = Path(kaleido.__file__).parent / "cli" / "browser_exe"
+        if chrome_path.exists() and any(chrome_path.iterdir()):
+            return True
+        # Also check choreographer's location
+        try:
+            import choreographer
+            choreo_path = Path(choreographer.__file__).parent / "cli" / "browser_exe"
+            if choreo_path.exists() and any(choreo_path.iterdir()):
+                return True
+        except ImportError:
+            pass
+        return False
+    except ImportError:
+        return False
+
+
+def ensure_chrome_installed() -> bool:
+    """
+    Ensure Chrome is installed for image export.
+
+    Returns:
+        True if Chrome is available or was installed, False if installation failed
+    """
+    if check_chrome_available():
+        return True
+
+    print("\n" + "=" * 60)
+    print("Chrome is required for image/GIF export but is not installed.")
+    print("=" * 60)
+    print("\nTo install Chrome, run one of the following commands:")
+    print("  $ uv run plotly_get_chrome")
+    print("  $ uv run kaleido_get_chrome")
+    print("\nOr from Python:")
+    print("  >>> import kaleido; kaleido.get_chrome_sync()")
+    print("\nAlternatively, use --output-format lightweight or --output-format html")
+    print("which do not require Chrome.\n")
+    return False
 
 
 def load_scenario(scenario_path: str) -> dict:
@@ -349,6 +400,10 @@ def generate_image_report(
         scenario_path: Path to scenario file (for node coordinates)
         data_dir: Base directory for run data
     """
+    # Check Chrome availability first
+    if not ensure_chrome_installed():
+        sys.exit(1)
+
     run_path = Path(data_dir) / run_id
 
     if not run_path.exists():
@@ -453,6 +508,10 @@ def generate_gif_animation(
         frame_skip: Generate every Nth frame to reduce size
         fps: Frames per second for GIF
     """
+    # Check Chrome availability first
+    if not ensure_chrome_installed():
+        sys.exit(1)
+
     run_path = Path(data_dir) / run_id
 
     if not run_path.exists():
@@ -680,16 +739,29 @@ Examples:
         print("=" * 60)
         print("Generating ALL output formats")
         print("=" * 60)
+
+        # Check Chrome availability for image/gif formats
+        chrome_available = check_chrome_available()
+        if not chrome_available:
+            print("\nNote: Chrome not installed. Image/GIF formats will be skipped.")
+            print("      Run 'uv run plotly_get_chrome' to enable them.\n")
+
         print("\n[1/4] Full HTML Report")
         generate_report(args.run_id, args.scenario, args.data_dir)
-        print("\n[2/4] PNG Images")
-        generate_image_report(args.run_id, args.scenario, args.data_dir)
-        print("\n[3/4] GIF Animation")
-        generate_gif_animation(args.run_id, args.scenario, args.data_dir)
+
+        if chrome_available:
+            print("\n[2/4] PNG Images")
+            generate_image_report(args.run_id, args.scenario, args.data_dir)
+            print("\n[3/4] GIF Animation")
+            generate_gif_animation(args.run_id, args.scenario, args.data_dir)
+        else:
+            print("\n[2/4] PNG Images - SKIPPED (Chrome not installed)")
+            print("\n[3/4] GIF Animation - SKIPPED (Chrome not installed)")
+
         print("\n[4/4] Lightweight HTML")
         generate_lightweight_report(args.run_id, args.scenario, args.data_dir)
         print("\n" + "=" * 60)
-        print("All formats generated successfully!")
+        print("Report generation complete!")
         print("=" * 60)
 
 
